@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strings"
 
 	"net/http"
 )
@@ -13,18 +14,25 @@ import (
 // Message is the type which we recieve from
 // clients
 type Message struct {
-	Bool     bool
-	Response Response
+	Bool bool
 }
 
-// Response is sent back to client
-type Response struct {
-	Exception string `json:"exception"`
+// arrayFlags holds a slice of flags
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return "string"
 }
+
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, strings.TrimSpace(value))
+	return nil
+}
+
+var HostFlags arrayFlags
 
 // ExecFlag is a flag which when set will be exeuted when pods are running
 var ExecFlag = flag.String("exec", "/bin/true", "help message for flagname")
-var Host = flag.String("host", "localhost", "wait for this host before executing")
 var ListenPort = flag.String("port", "8080", "port to listen on")
 
 // Incoming will save our incoming requests
@@ -38,13 +46,15 @@ func resolveHost(ip string) []string {
 	return resolved
 }
 
-func matchHost(resolved []string) bool {
-	for _, h := range resolved {
-		if h == *Host {
-			return true
+func matchHost(resolved []string) (string, bool) {
+	for _, r := range resolved {
+		for h := range Incoming {
+			if h == r {
+				return h, true
+			}
 		}
 	}
-	return false
+	return "", false
 }
 
 func checkHosts() bool {
@@ -58,7 +68,6 @@ func checkHosts() bool {
 
 func handleMessage(r *http.Request, message *Message) {
 	// handleMessage takes an incoming request and determines if it satisfies our conditions
-	message.Response.Exception = "wow"
 	raddr := r.RemoteAddr
 	host, _, err := net.SplitHostPort(raddr)
 	if err != nil {
@@ -66,17 +75,26 @@ func handleMessage(r *http.Request, message *Message) {
 	}
 
 	resolved := resolveHost(host)
-	Incoming[host] = matchHost(resolved)
-
-	if !Incoming[host] {
-		fmt.Printf("Unwanted host: [%s]%s", host, raddr)
+	matchedHost, isMatch := matchHost(resolved)
+	if isMatch {
+		Incoming[matchedHost] = true
+	} else {
+		fmt.Printf("%s not in list of hosts\n", resolved[0])
 	}
 	if checkHosts() {
 		// everyone has phone in so now
 		// we can exec
-		message.Response.Exception = "done"
-		fmt.Printf("All %v host(s) have phoned in...", len(Incoming))
+		fmt.Printf("All %v host(s) have phoned in...\n", len(Incoming))
 		runCommand()
+		// Should cleanly exit now and pass execution onto target program
+	} else {
+		i := 0
+		for _, v := range Incoming {
+			if v == true {
+				i++
+			}
+		}
+		fmt.Printf("%v/%v\n", i, len(Incoming))
 	}
 
 }
@@ -93,8 +111,8 @@ func main() {
 	http.HandleFunc("/decode", func(w http.ResponseWriter, r *http.Request) {
 		var message Message
 		json.NewDecoder(r.Body).Decode(&message)
-		json.NewEncoder(w).Encode(message.Response)
 		handleMessage(r, &message)
+		fmt.Fprintf(w, "%s", "pong")
 	})
 	http.ListenAndServe(":"+*ListenPort, nil)
 }
@@ -102,5 +120,10 @@ func main() {
 func init() {
 	// create a map with all the incoming clients
 	Incoming = make(map[string]bool)
+	flag.Var(&HostFlags, "host", "hosts to wait for")
 	flag.Parse()
+
+	for _, host := range HostFlags {
+		Incoming[host] = false
+	}
 }
