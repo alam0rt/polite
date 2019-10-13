@@ -76,7 +76,8 @@ func (h *Host) resolve() {
 func resolveHost(ip string) []string {
 	resolved, err := net.LookupAddr(ip)
 	if err != nil {
-		fmt.Printf("%s cannot be resolved!", ip)
+		fmt.Printf("%s cannot be resolved!\n", ip)
+		// TODO: better logging here
 	}
 	return resolved
 }
@@ -141,7 +142,7 @@ func handleMessage(r *http.Request, message *Message) {
 	raddr := r.RemoteAddr
 	ip, port, err := net.SplitHostPort(raddr)
 	if err != nil {
-		fmt.Printf("%s not a valid host?", raddr)
+		fmt.Printf("%s not a valid host", raddr)
 	}
 
 	resolved := resolveHost(ip)
@@ -156,7 +157,7 @@ func handleMessage(r *http.Request, message *Message) {
 			request:    *message,
 		}
 	} else {
-		fmt.Printf("%s not in list of hosts\n", resolved[0])
+		fmt.Printf("%s not a known host\n", ip)
 	}
 	if checkHosts2() {
 		// everyone has phone in so now we can exec
@@ -187,21 +188,27 @@ func main() {
 		buf    bytes.Buffer
 		logger = log.New(&buf, "logger: ", log.Lshortfile)
 	)
+	if len(Hosts) == 0 {
+		logger.Fatalf("no hosts provided!")
+	}
 
 	logger.Printf("started %s on :%s\n", NAME, *ListenPort)
 	logger.Printf("politely waiting to execute %s", *ExecFlag)
 
 	fmt.Print(&buf)
-	http.HandleFunc("/decode", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%v/%v\n", countReady(), len(Hosts))
+	})
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		var message Message
 		json.NewDecoder(r.Body).Decode(&message)
 		handleMessage(r, &message)
-		fmt.Fprintf(w, "%s\n", "pong")
 		for h := range Hosts {
 			if Hosts[h].ready {
 				logger.Printf("%s ready (%v/%v)\n", h, countReady(), len(Hosts))
 			}
 		}
+		fmt.Fprintf(w, "%s\n", "pong")
 		fmt.Print(&buf)
 	})
 	http.ListenAndServe(":"+*ListenPort, nil)
