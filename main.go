@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os/exec"
+        "os"
 	"strings"
 
 	"net/http"
@@ -196,7 +197,11 @@ func runCommand() {
 	err := cmd.Run()
 	if err != nil {
 		logger.Printf("ran %s with error: %v", *ExecFlag, err)
+                fmt.Print(&buf)
+                os.Exit(1)
 	}
+        fmt.Print(&buf)
+        os.Exit(0)
 }
 
 func main() {
