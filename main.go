@@ -16,6 +16,15 @@ import (
 // NAME is the name of the program
 const NAME = "polite"
 
+// SHELL is path to the shell
+const SHELL = "/bin/sh"
+
+// Set up logging
+var (
+	buf    bytes.Buffer
+	logger = log.New(&buf, NAME+": ", log.Lshortfile)
+)
+
 // Message is the type which we recieve from
 // clients
 type Message struct {
@@ -60,29 +69,20 @@ var Incoming map[string]bool
 // Hosts will hold the Host struct
 var Hosts map[string]Host
 
-func (h *Host) status() bool {
-	return h.ready
-}
-
-func (h *Host) resolve() {
-	if h.remoteAddr == "" {
-		fmt.Print("bad")
-	}
-	resolved := resolveHost(h.remoteAddr)
-	fmt.Print(resolved)
-
-}
-
 func resolveHost(ip string) []string {
+	// resolveHost takes an IP and returns
+	// a slice containing all resolved names
 	resolved, err := net.LookupAddr(ip)
 	if err != nil {
-		fmt.Printf("%s cannot be resolved!\n", ip)
-		// TODO: better logging here
+		logger.Printf("%s cannot be resolved!\n", ip)
 	}
 	return resolved
 }
 
 func matchHost2(resolved []string) (string, bool) {
+	// matchHost2 returns the matched hostname and a boolean
+	// if hosts provided by the `-host` argument successfully
+	// matches a resolved name
 	for _, r := range resolved {
 		for h := range Hosts {
 			if h == r {
@@ -105,7 +105,10 @@ func matchHost(resolved []string) (string, bool) {
 }
 
 func checkHosts2() bool {
-	// assume everoyne is unready
+	// checkHosts2 assumes all hosts in the `Hosts` construct
+	// are unready. It then iterates over all of those hosts and
+	// subtracts when one is ready. If all are ready, the counter
+	// will be 0 and then we can return a boolean.
 	unready := len(Hosts)
 	for _, h := range Hosts {
 		if h.ready {
@@ -128,6 +131,9 @@ func checkHosts() bool {
 }
 
 func countReady() int {
+	// countReady is a global function
+	// which simply returns the number
+	// of ready hosts as an int
 	count := 0
 	for host := range Hosts {
 		if Hosts[host].ready {
@@ -142,7 +148,7 @@ func handleMessage(r *http.Request, message *Message) {
 	raddr := r.RemoteAddr
 	ip, port, err := net.SplitHostPort(raddr)
 	if err != nil {
-		fmt.Printf("%s not a valid host", raddr)
+		logger.Printf("%s not a valid host", raddr)
 	}
 
 	resolved := resolveHost(ip)
@@ -157,37 +163,43 @@ func handleMessage(r *http.Request, message *Message) {
 			request:    *message,
 		}
 	} else {
-		fmt.Printf("%s not a known host\n", ip)
+		logger.Printf("%s not a known host\n", ip)
 	}
 	if checkHosts2() {
 		// everyone has phone in so now we can exec
-		fmt.Printf("All %v host(s) have phoned in...\n", len(Incoming))
+		logger.Printf("executing %s\n", *ExecFlag)
 		runCommand()
-	} else {
-		i := 0
-		for _, v := range Hosts {
-			if v.ready == true {
-				i++
-			}
-		}
-		fmt.Printf("%v/%v\n", i, len(Hosts))
 	}
+}
 
+func politeExec(args ...string) *exec.Cmd {
+	// politeExec if given a single argument will exec it direct
+	// providing 2 or more arguments will construct a /bin/sh -c "args.." for execution
+	var buffer bytes.Buffer
+	name := args[0]
+	if len(args) == 1 {
+		return exec.Command(name)
+	}
+	for _, arg := range args {
+		buffer.WriteString(arg + " ")
+	}
+	cmd := []string{
+		"-c",
+		buffer.String(),
+	}
+	return exec.Command(SHELL, cmd...)
 }
 
 func runCommand() {
-	cmd := exec.Command(*ExecFlag)
+	c := strings.Fields(*ExecFlag)
+	cmd := politeExec(c...)
 	err := cmd.Run()
 	if err != nil {
-		fmt.Printf("ran %s with error: %v", *ExecFlag, err)
+		logger.Printf("ran %s with error: %v", *ExecFlag, err)
 	}
 }
 
 func main() {
-	var (
-		buf    bytes.Buffer
-		logger = log.New(&buf, "logger: ", log.Lshortfile)
-	)
 	if len(Hosts) == 0 {
 		logger.Fatalf("no hosts provided!")
 	}
@@ -195,10 +207,15 @@ func main() {
 	logger.Printf("started %s on :%s\n", NAME, *ListenPort)
 	logger.Printf("politely waiting to execute %s", *ExecFlag)
 
-	fmt.Print(&buf)
 	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		logger.Printf("%s requested status\n", r.RemoteAddr)
 		fmt.Fprintf(w, "%v/%v\n", countReady(), len(Hosts))
+		fmt.Print(&buf)
+		buf.Reset()
 	})
+	// print logs and then clear buffer
+	fmt.Print(&buf)
+	buf.Reset()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		var message Message
 		json.NewDecoder(r.Body).Decode(&message)
@@ -208,8 +225,9 @@ func main() {
 				logger.Printf("%s ready (%v/%v)\n", h, countReady(), len(Hosts))
 			}
 		}
-		fmt.Fprintf(w, "%s\n", "pong")
 		fmt.Print(&buf)
+		buf.Reset()
+		fmt.Fprintf(w, "%s\n", "pong")
 	})
 	http.ListenAndServe(":"+*ListenPort, nil)
 }
