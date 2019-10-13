@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
-        "os"
 	"strings"
 
 	"net/http"
@@ -64,16 +64,28 @@ var ExecFlag = flag.String("exec", "/bin/true", "help message for flagname")
 // ListenPort is a flag to set which port to listen on
 var ListenPort = flag.String("port", "8080", "port to listen on")
 
+// DebugFlag is a flag which enables debug logging
+var DebugFlag = flag.Bool("debug", false, "set to enable debug logging")
+
 // Incoming will save our incoming requests
 var Incoming map[string]bool
 
 // Hosts will hold the Host struct
 var Hosts map[string]Host
 
+func debugf(log ...string) {
+	if *DebugFlag {
+		logger.Printf("debug: %s\n", log)
+		fmt.Print(&buf)
+		buf.Reset()
+	}
+}
+
 func resolveHost(ip string) []string {
 	// resolveHost takes an IP and returns
 	// a slice containing all resolved names
 	resolved, err := net.LookupAddr(ip)
+	debugf(resolved...)
 	if err != nil {
 		logger.Printf("%s cannot be resolved!\n", ip)
 	}
@@ -85,7 +97,9 @@ func matchHost2(resolved []string) (string, bool) {
 	// if hosts provided by the `-host` argument successfully
 	// matches a resolved name
 	for _, r := range resolved {
+		debugf("Resolved: " + r)
 		for h := range Hosts {
+			debugf("Hosts: " + h)
 			if h == r {
 				return h, true
 			}
@@ -150,6 +164,7 @@ func handleMessage(r *http.Request, message *Message) {
 	ip, port, err := net.SplitHostPort(raddr)
 	if err != nil {
 		logger.Printf("%s not a valid host", raddr)
+		logger.Print(err)
 	}
 
 	resolved := resolveHost(ip)
@@ -197,11 +212,11 @@ func runCommand() {
 	err := cmd.Run()
 	if err != nil {
 		logger.Printf("ran %s with error: %v", *ExecFlag, err)
-                fmt.Print(&buf)
-                os.Exit(1)
+		fmt.Print(&buf)
+		os.Exit(1)
 	}
-        fmt.Print(&buf)
-        os.Exit(0)
+	fmt.Print(&buf)
+	os.Exit(0)
 }
 
 func main() {
